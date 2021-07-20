@@ -72,9 +72,11 @@ func (c *RawSharedEVMConfig) ParseConfig() (*SharedEVMConfig, error) {
 		config.GasLimit = big.NewInt(c.GasLimit)
 	}
 
-	if c.MaxGasPrice != 0 {
-		config.MaxGasPrice = big.NewInt(c.MaxGasPrice)
-	}
+	// Allow gas price of zero for testing with Optimism until they integrate gas prices
+	// if c.MaxGasPrice != 0 {
+	// 	config.MaxGasPrice = big.NewInt(c.MaxGasPrice)
+	// }
+	config.MaxGasPrice = big.NewInt(c.MaxGasPrice)
 
 	if c.GasMultiplier != 0 {
 		config.GasMultiplier = big.NewFloat(c.GasMultiplier)

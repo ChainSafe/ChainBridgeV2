@@ -32,13 +32,14 @@ type ProposalHandler func(msg *relayer.Message) []interface{}
 type ProposalHandlers map[relayer.TransferType]ProposalHandler
 
 type SubstrateWriter struct {
-	client   Voter
-	handlers ProposalHandlers
-	chainID  uint8
+	client     Voter
+	handlers   ProposalHandlers
+	chainID    uint8
+	extendCall bool
 }
 
-func NewSubstrateWriter(chainID uint8, client Voter) *SubstrateWriter {
-	return &SubstrateWriter{chainID: chainID, client: client}
+func NewSubstrateWriter(chainID uint8, client Voter, extendCall bool) *SubstrateWriter {
+	return &SubstrateWriter{chainID: chainID, client: client, extendCall: extendCall}
 }
 
 func (w *SubstrateWriter) RegisterHandler(t relayer.TransferType, handler ProposalHandler) {
@@ -125,13 +126,13 @@ func (w *SubstrateWriter) createProposal(sourceChain uint8, depositNonce uint64,
 		return nil, err
 	}
 	// TODO: Is not these should be always enabled?
-	//if w.extendCall {
-	//	eRID, err := types.EncodeToBytes(resourceId)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	call.Args = append(call.Args, eRID...)
-	//}
+	if w.extendCall {
+		eRID, err := types.EncodeToBytes(resourceId)
+		if err != nil {
+			return nil, err
+		}
+		call.Args = append(call.Args, eRID...)
+	}
 	return &SubstrateProposal{
 		DepositNonce: types.U64(depositNonce),
 		Call:         call,

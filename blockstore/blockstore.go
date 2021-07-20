@@ -71,5 +71,5 @@ func SetupBlockstore(generalConfig *config.GeneralChainConfig, kvdb KeyValueRead
 			return startBlock, nil
 		}
 	}
-	return big.NewInt(0), nil
+	return startBlock, nil
 }

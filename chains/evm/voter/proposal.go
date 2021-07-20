@@ -3,6 +3,7 @@ package voter
 import (
 	"context"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/status-im/keycard-go/hexutils"
@@ -28,7 +29,8 @@ type Proposal struct {
 }
 
 func (p *Proposal) Status(evmCaller ChainClient) (relayer.ProposalStatus, error) {
-	definition := "[{\"inputs\":[{\"internalType\":\"uint8\",\"name\":\"originChainID\",\"type\":\"uint8\"},{\"internalType\":\"uint64\",\"name\":\"depositNonce\",\"type\":\"uint64\"},{\"internalType\":\"bytes32\",\"name\":\"dataHash\",\"type\":\"bytes32\"}],\"name\":\"getProposal\",\"outputs\":[{\"components\":[{\"internalType\":\"bytes32\",\"name\":\"_resourceID\",\"type\":\"bytes32\"},{\"internalType\":\"bytes32\",\"name\":\"_dataHash\",\"type\":\"bytes32\"},{\"internalType\":\"address[]\",\"name\":\"_yesVotes\",\"type\":\"address[]\"},{\"internalType\":\"address[]\",\"name\":\"_noVotes\",\"type\":\"address[]\"},{\"internalType\":\"enumBridge.ProposalStatus\",\"name\":\"_status\",\"type\":\"uint8\"},{\"internalType\":\"uint256\",\"name\":\"_proposedBlock\",\"type\":\"uint256\"}],\"internalType\":\"structBridge.Proposal\",\"name\":\"\",\"type\":\"tuple\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
+	log.Debug().Str("rID", hexutils.BytesToHex(p.ResourceId[:])).Uint64("depositNonce", p.DepositNonce).Msg("Checking proposal status")
+	definition := "[{\"inputs\":[{\"internalType\":\"uint8\",\"name\":\"originChainID\",\"type\":\"uint8\"},{\"internalType\":\"uint64\",\"name\":\"depositNonce\",\"type\":\"uint64\"},{\"internalType\":\"bytes32\",\"name\":\"dataHash\",\"type\":\"bytes32\"}],\"name\":\"getProposal\",\"outputs\":[{\"components\":[{\"internalType\":\"enum Bridge.ProposalStatus\",\"name\":\"_status\",\"type\":\"uint8\"},{\"internalType\":\"uint200\",\"name\":\"_yesVotes\",\"type\":\"uint200\"},{\"internalType\":\"uint8\",\"name\":\"_yesVotesTotal\",\"type\":\"uint8\"},{\"internalType\":\"uint40\",\"name\":\"_proposedBlock\",\"type\":\"uint40\"}],\"internalType\":\"struct Bridge.Proposal\",\"name\":\"\",\"type\":\"tuple\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
 	a, err := abi.JSON(strings.NewReader(definition))
 	if err != nil {
 		return relayer.ProposalStatusInactive, err // Not sure what status to use here
@@ -40,15 +42,14 @@ func (p *Proposal) Status(evmCaller ChainClient) (relayer.ProposalStatus, error)
 
 	msg := ethereum.CallMsg{From: common.Address{}, To: &p.BridgeAddress, Data: input}
 	out, err := evmCaller.CallContract(context.TODO(), toCallArg(msg), nil)
+	log.Debug().Msg(strconv.Itoa(len(out)))
 	if err != nil {
 		return relayer.ProposalStatusInactive, err
 	}
 	type bridgeProposal struct {
-		ResourceID    [32]byte
-		DataHash      [32]byte
-		YesVotes      []common.Address
-		NoVotes       []common.Address
 		Status        uint8
+		YesVotes      *big.Int
+		YesVotesTotal uint8
 		ProposedBlock *big.Int
 	}
 	res, err := a.Unpack("getProposal", out)
@@ -57,6 +58,7 @@ func (p *Proposal) Status(evmCaller ChainClient) (relayer.ProposalStatus, error)
 }
 
 func (p *Proposal) VotedBy(evmCaller ChainClient, by common.Address) (bool, error) {
+	log.Debug().Str("rID", hexutils.BytesToHex(p.ResourceId[:])).Uint64("depositNonce", p.DepositNonce).Msg("Checking has voted on proposal")
 	definition := "[{\"inputs\":[{\"internalType\":\"uint72\",\"name\":\"\",\"type\":\"uint72\"},{\"internalType\":\"bytes32\",\"name\":\"\",\"type\":\"bytes32\"},{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"name\":\"_hasVotedOnProposal\",\"outputs\":[{\"internalType\":\"bool\",\"name\":\"\",\"type\":\"bool\"}],\"stateMutability\":\"view\",\"type\":\"function\"}]"
 	a, err := abi.JSON(strings.NewReader(definition))
 	if err != nil {
@@ -87,7 +89,8 @@ func (p *Proposal) Execute(client ChainClient) error {
 	if err != nil {
 		return err
 	}
-	gasLimit := uint64(2000000)
+	msg := ethereum.CallMsg{From: client.RelayerAddress(), To: &p.BridgeAddress, Data: input}
+	gasLimit := client.GasLimit(msg).Uint64()
 	gp, err := client.GasPrice()
 	if err != nil {
 		return err
@@ -97,6 +100,8 @@ func (p *Proposal) Execute(client ChainClient) error {
 	if err != nil {
 		return err
 	}
+	log.Debug().Msgf("gasLimit: %v", gasLimit)
+	log.Debug().Msgf("gasPrice: %v", gp)
 	tx := evmtransaction.NewTransaction(n.Uint64(), p.BridgeAddress, big.NewInt(0), gasLimit, gp, input)
 	hash, err := client.SignAndSendTransaction(context.TODO(), tx)
 	if err != nil {
@@ -122,7 +127,8 @@ func (p *Proposal) Vote(client ChainClient) error {
 	if err != nil {
 		return err
 	}
-	gasLimit := uint64(1000000)
+	msg := ethereum.CallMsg{From: client.RelayerAddress(), To: &p.BridgeAddress, Data: input}
+	gasLimit := client.GasLimit(msg).Uint64()
 	gp, err := client.GasPrice()
 	if err != nil {
 		return err
@@ -132,6 +138,8 @@ func (p *Proposal) Vote(client ChainClient) error {
 	if err != nil {
 		return err
 	}
+	log.Debug().Msgf("gasLimit: %v", gasLimit)
+	log.Debug().Msgf("gasPrice: %v", gp)
 	tx := evmtransaction.NewTransaction(n.Uint64(), p.BridgeAddress, big.NewInt(0), gasLimit, gp, input)
 	hash, err := client.SignAndSendTransaction(context.TODO(), tx)
 	if err != nil {

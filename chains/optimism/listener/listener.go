@@ -27,6 +27,7 @@ type ChainClient interface {
 	LatestBlock() (*big.Int, error)
 	FetchDepositLogs(ctx context.Context, address common.Address, startBlock *big.Int, endBlock *big.Int) ([]*DepositLogs, error)
 	CallContract(ctx context.Context, callArgs map[string]interface{}, blockNumber *big.Int) ([]byte, error)
+	IsRollupVerified(blockNumber uint64) bool
 }
 
 type EventHandler interface {
@@ -53,6 +54,7 @@ func (l *EVMListener) ListenToEvents(startBlock *big.Int, chainID uint8, kvrw bl
 				return
 			default:
 				head, err := l.chainReader.LatestBlock()
+				log.Debug().Msgf("latest block when listening to events: %v", head)
 				if err != nil {
 					log.Error().Err(err).Msg("Unable to get latest block")
 					time.Sleep(BlockRetryInterval)
@@ -70,6 +72,13 @@ func (l *EVMListener) ListenToEvents(startBlock *big.Int, chainID uint8, kvrw bl
 					log.Error().Err(err).Str("ChainID", string(chainID)).Msgf("Unable to filter logs")
 					continue
 				}
+				// TODO: perhaps this would be better within `FetchDepositLogs` and then could avoid the separate listener package
+				// However, the block delay comparison is within this method and is still necessary with optimism
+				if len(logs) != 0 && !l.chainReader.IsRollupVerified(startBlock.Uint64()) {
+					log.Error().Msgf("Block Number: %v", startBlock)
+					continue
+				}
+				log.Debug().Msgf("In listener, rollup is verified, can handle deposit event on optimism")
 				for _, eventLog := range logs {
 					m, err := l.eventHandler.HandleEvent(chainID, eventLog.DestinationChainID, eventLog.DepositNonce, eventLog.ResourceID)
 					if err != nil {

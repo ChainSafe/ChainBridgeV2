@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/ChainSafe/chainbridge-core/crypto/secp256k1"
 	"github.com/ChainSafe/chainbridge-core/keystore"
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -114,20 +116,27 @@ const (
 )
 
 func (c *EVMClient) FetchDepositLogs(ctx context.Context, contractAddress common.Address, startBlock *big.Int, endBlock *big.Int) ([]*listener.DepositLogs, error) {
+	definition := "[{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"uint8\",\"name\":\"destinationChainID\",\"type\":\"uint8\"},{\"indexed\":false,\"internalType\":\"bytes32\",\"name\":\"resourceID\",\"type\":\"bytes32\"},{\"indexed\":false,\"internalType\":\"uint64\",\"name\":\"depositNonce\",\"type\":\"uint64\"}],\"name\":\"Deposit\",\"type\":\"event\"}]"
+	contractAbi, err := abi.JSON(strings.NewReader(definition))
+	if err != nil {
+		log.Fatal().Msgf("error: %v", err)
+	}
+
 	logs, err := c.FilterLogs(ctx, buildQuery(contractAddress, DepositSignature, startBlock, endBlock))
 	if err != nil {
 		return nil, err
 	}
 	depositLogs := make([]*listener.DepositLogs, 0)
-
 	for _, l := range logs {
-		dl := &listener.DepositLogs{
-			DestinationID: uint8(l.Topics[1].Big().Uint64()),
-			ResourceID:    l.Topics[2],
-			DepositNonce:  l.Topics[3].Big().Uint64(),
+		var dl listener.DepositLogs
+		err := contractAbi.UnpackIntoInterface(&dl, "Deposit", l.Data)
+		if err != nil {
+			log.Fatal().Msgf("error: %v", err)
 		}
-		depositLogs = append(depositLogs, dl)
+		log.Info().Msgf("Deposit Logs dest chain id: %v, deposit nonce: %v, resource id: %v", dl.DestinationChainID, dl.DepositNonce, dl.ResourceID)
+		depositLogs = append(depositLogs, &dl)
 	}
+
 	return depositLogs, nil
 }
 
@@ -213,6 +222,10 @@ func (c *EVMClient) UnsafeIncreaseNonce() error {
 	return nil
 }
 
+func (c *EVMClient) GasLimit(msg ethereum.CallMsg) *big.Int {
+	return c.config.SharedEVMConfig.GasLimit
+}
+
 func (c *EVMClient) GasPrice() (*big.Int, error) {
 	gasPrice, err := c.SafeEstimateGas(context.TODO())
 	if err != nil {
@@ -228,8 +241,6 @@ func (c *EVMClient) SafeEstimateGas(ctx context.Context) (*big.Int, error) {
 	}
 
 	gasPrice := multiplyGasPrice(suggestedGasPrice, c.config.SharedEVMConfig.GasMultiplier)
-
-	// Check we aren't exceeding our limit
 
 	if gasPrice.Cmp(c.config.SharedEVMConfig.MaxGasPrice) == 1 {
 		return c.config.SharedEVMConfig.MaxGasPrice, nil
